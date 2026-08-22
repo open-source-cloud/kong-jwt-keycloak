@@ -1,4 +1,4 @@
-package main
+package plugin
 
 import (
 	"encoding/json"
@@ -8,16 +8,18 @@ import (
 
 	"github.com/Kong/go-pdk"
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/open-source-cloud/kong-jwt-keycloak/pkg/keycloak"
 )
 
-var jwksProvider *JWKSProvider
+var jwksProvider *keycloak.JWKSProvider
 
 func (conf *Config) Access(kong *pdk.PDK) {
 	conf.applyDefaults()
 
 	// Lazy-init the global JWKS provider
 	if jwksProvider == nil {
-		jwksProvider = NewJWKSProvider(conf.WellKnownTemplate, conf.JWKSCacheTTL)
+		jwksProvider = keycloak.NewJWKSProvider(conf.WellKnownTemplate, conf.JWKSCacheTTL)
 	}
 
 	// 1. Skip preflight if configured
@@ -45,7 +47,7 @@ func (conf *Config) Access(kong *pdk.PDK) {
 
 	// 3. Parse token without verification to read header
 	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
-	unverified, _, err := parser.ParseUnverified(tokenStr, &KeycloakClaims{})
+	unverified, _, err := parser.ParseUnverified(tokenStr, &keycloak.Claims{})
 	if err != nil {
 		exitUnauthorized(kong, "malformed token")
 		return
@@ -65,7 +67,7 @@ func (conf *Config) Access(kong *pdk.PDK) {
 	}
 
 	// 5. Validate issuer
-	unverifiedClaims := unverified.Claims.(*KeycloakClaims)
+	unverifiedClaims := unverified.Claims.(*keycloak.Claims)
 	issuer, _ := unverifiedClaims.GetIssuer()
 	if !isAllowedIssuer(issuer, conf.AllowedIss) {
 		exitUnauthorized(kong, fmt.Sprintf("invalid issuer: %s", issuer))
@@ -120,13 +122,13 @@ func (conf *Config) Access(kong *pdk.PDK) {
 
 // verifyToken parses and verifies the JWT signature using JWKS.
 // On signature failure, it retries once if the cache is stale (key rotation).
-func verifyToken(tokenStr, issuer, kid string, conf *Config) (*KeycloakClaims, error) {
+func verifyToken(tokenStr, issuer, kid string, conf *Config) (*keycloak.Claims, error) {
 	pubKey, err := jwksProvider.GetKey(issuer, kid)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get public key: %w", err)
 	}
 
-	claims := &KeycloakClaims{}
+	claims := &keycloak.Claims{}
 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
 		return pubKey, nil
 	}, jwt.WithIssuer(issuer), jwt.WithExpirationRequired())

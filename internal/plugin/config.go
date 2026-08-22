@@ -1,4 +1,4 @@
-package main
+package plugin
 
 // Config holds the plugin configuration, mapped from KongPlugin CRD config fields.
 // All fields use JSON tags matching the Kong plugin schema.

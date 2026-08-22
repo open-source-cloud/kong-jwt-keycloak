@@ -1,11 +1,11 @@
-package main
+package keycloak
 
 import (
 	"testing"
 )
 
 func TestKeycloakClaims_RealmRoles(t *testing.T) {
-	claims := &KeycloakClaims{
+	claims := &Claims{
 		RealmAccess: RoleSet{Roles: []string{"admin", "viewer"}},
 	}
 
@@ -16,18 +16,18 @@ func TestKeycloakClaims_RealmRoles(t *testing.T) {
 }
 
 func TestKeycloakClaims_RealmRoles_Empty(t *testing.T) {
-	claims := &KeycloakClaims{}
+	claims := &Claims{}
 	if roles := claims.RealmRoles(); len(roles) != 0 {
 		t.Fatalf("expected empty roles, got: %v", roles)
 	}
 }
 
 func TestKeycloakClaims_ClientRoles(t *testing.T) {
-	claims := &KeycloakClaims{
+	claims := &Claims{
 		Azp: "my-api",
 		ResourceAccess: map[string]RoleSet{
-			"my-api": {Roles: []string{"read", "write"}},
-			"other-client":  {Roles: []string{"admin"}},
+			"my-api":       {Roles: []string{"read", "write"}},
+			"other-client": {Roles: []string{"admin"}},
 		},
 	}
 
@@ -38,14 +38,14 @@ func TestKeycloakClaims_ClientRoles(t *testing.T) {
 }
 
 func TestKeycloakClaims_ClientRoles_NoResourceAccess(t *testing.T) {
-	claims := &KeycloakClaims{Azp: "myapp"}
+	claims := &Claims{Azp: "myapp"}
 	if roles := claims.ClientRoles(); roles != nil {
 		t.Fatalf("expected nil, got: %v", roles)
 	}
 }
 
 func TestKeycloakClaims_ClientRoles_WrongClient(t *testing.T) {
-	claims := &KeycloakClaims{
+	claims := &Claims{
 		Azp: "myapp",
 		ResourceAccess: map[string]RoleSet{
 			"other-app": {Roles: []string{"admin"}},
@@ -57,7 +57,7 @@ func TestKeycloakClaims_ClientRoles_WrongClient(t *testing.T) {
 }
 
 func TestKeycloakClaims_Scopes(t *testing.T) {
-	claims := &KeycloakClaims{Scope: "openid profile email"}
+	claims := &Claims{Scope: "openid profile email"}
 	scopes := claims.Scopes()
 	if len(scopes) != 3 {
 		t.Fatalf("expected 3 scopes, got: %v", scopes)
@@ -68,21 +68,21 @@ func TestKeycloakClaims_Scopes(t *testing.T) {
 }
 
 func TestKeycloakClaims_Scopes_Empty(t *testing.T) {
-	claims := &KeycloakClaims{}
+	claims := &Claims{}
 	if scopes := claims.Scopes(); scopes != nil {
 		t.Fatalf("expected nil for empty scope, got: %v", scopes)
 	}
 }
 
 func TestKeycloakClaims_TenantID(t *testing.T) {
-	claims := &KeycloakClaims{TenantID: "cnh"}
+	claims := &Claims{TenantID: "cnh"}
 	if claims.TenantID != "cnh" {
 		t.Fatalf("expected tenant_id=cnh, got %q", claims.TenantID)
 	}
 }
 
 func TestKeycloakClaims_AudienceString_Single(t *testing.T) {
-	c := &KeycloakClaims{}
+	c := &Claims{}
 	c.Audience = []string{"my-public"}
 	if got := c.AudienceString(); got != "my-public" {
 		t.Fatalf("unexpected audience: %q", got)
@@ -90,7 +90,7 @@ func TestKeycloakClaims_AudienceString_Single(t *testing.T) {
 }
 
 func TestKeycloakClaims_AudienceString_Multiple(t *testing.T) {
-	c := &KeycloakClaims{}
+	c := &Claims{}
 	c.Audience = []string{"my-public", "account"}
 	if got := c.AudienceString(); got != "my-public,account" {
 		t.Fatalf("unexpected audience: %q", got)
@@ -98,7 +98,7 @@ func TestKeycloakClaims_AudienceString_Multiple(t *testing.T) {
 }
 
 func TestKeycloakClaims_AudienceString_Empty(t *testing.T) {
-	c := &KeycloakClaims{}
+	c := &Claims{}
 	if got := c.AudienceString(); got != "" {
 		t.Fatalf("expected empty audience, got %q", got)
 	}

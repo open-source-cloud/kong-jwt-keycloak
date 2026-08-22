@@ -1,4 +1,4 @@
-package main
+package keycloak
 
 import (
 	"crypto/rsa"
@@ -33,9 +33,9 @@ type wellKnownResponse struct {
 
 // cachedKeys holds the fetched keys and metadata for cache invalidation.
 type cachedKeys struct {
-	keys        map[string]*rsa.PublicKey
-	fetchedAt   time.Time
-	jwksURI     string
+	keys      map[string]*rsa.PublicKey
+	fetchedAt time.Time
+	jwksURI   string
 }
 
 // JWKSProvider fetches and caches JWKS keys from Keycloak.

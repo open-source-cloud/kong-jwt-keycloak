@@ -1,11 +1,13 @@
-package main
+package plugin
 
 import (
 	"testing"
+
+	"github.com/open-source-cloud/kong-jwt-keycloak/pkg/keycloak"
 )
 
 func TestCheckAccess_NoRestrictions(t *testing.T) {
-	claims := &KeycloakClaims{}
+	claims := &keycloak.Claims{}
 	conf := &Config{}
 
 	if err := CheckAccess(claims, conf); err != nil {
@@ -14,8 +16,8 @@ func TestCheckAccess_NoRestrictions(t *testing.T) {
 }
 
 func TestCheckAccess_RealmRoles_Pass(t *testing.T) {
-	claims := &KeycloakClaims{
-		RealmAccess: RoleSet{Roles: []string{"admin", "viewer"}},
+	claims := &keycloak.Claims{
+		RealmAccess: keycloak.RoleSet{Roles: []string{"admin", "viewer"}},
 	}
 	conf := &Config{RealmRoles: []string{"admin"}}
 
@@ -25,8 +27,8 @@ func TestCheckAccess_RealmRoles_Pass(t *testing.T) {
 }
 
 func TestCheckAccess_RealmRoles_Fail(t *testing.T) {
-	claims := &KeycloakClaims{
-		RealmAccess: RoleSet{Roles: []string{"viewer"}},
+	claims := &keycloak.Claims{
+		RealmAccess: keycloak.RoleSet{Roles: []string{"viewer"}},
 	}
 	conf := &Config{RealmRoles: []string{"admin"}}
 
@@ -36,8 +38,8 @@ func TestCheckAccess_RealmRoles_Fail(t *testing.T) {
 }
 
 func TestCheckAccess_RealmRoles_ORLogic(t *testing.T) {
-	claims := &KeycloakClaims{
-		RealmAccess: RoleSet{Roles: []string{"viewer"}},
+	claims := &keycloak.Claims{
+		RealmAccess: keycloak.RoleSet{Roles: []string{"viewer"}},
 	}
 	conf := &Config{RealmRoles: []string{"admin", "viewer"}}
 
@@ -47,9 +49,9 @@ func TestCheckAccess_RealmRoles_ORLogic(t *testing.T) {
 }
 
 func TestCheckAccess_ClientRoles_Pass(t *testing.T) {
-	claims := &KeycloakClaims{
+	claims := &keycloak.Claims{
 		Azp: "my-api",
-		ResourceAccess: map[string]RoleSet{
+		ResourceAccess: map[string]keycloak.RoleSet{
 			"my-api": {Roles: []string{"write", "read"}},
 		},
 	}
@@ -61,7 +63,7 @@ func TestCheckAccess_ClientRoles_Pass(t *testing.T) {
 }
 
 func TestCheckAccess_ClientRoles_Fail_NoResourceAccess(t *testing.T) {
-	claims := &KeycloakClaims{Azp: "my-api"}
+	claims := &keycloak.Claims{Azp: "my-api"}
 	conf := &Config{ClientRoles: []string{"write"}}
 
 	if err := CheckAccess(claims, conf); err == nil {
@@ -70,7 +72,7 @@ func TestCheckAccess_ClientRoles_Fail_NoResourceAccess(t *testing.T) {
 }
 
 func TestCheckAccess_Scope_Pass(t *testing.T) {
-	claims := &KeycloakClaims{Scope: "openid profile email"}
+	claims := &keycloak.Claims{Scope: "openid profile email"}
 	conf := &Config{Scope: []string{"profile"}}
 
 	if err := CheckAccess(claims, conf); err != nil {
@@ -79,7 +81,7 @@ func TestCheckAccess_Scope_Pass(t *testing.T) {
 }
 
 func TestCheckAccess_Scope_Fail(t *testing.T) {
-	claims := &KeycloakClaims{Scope: "openid"}
+	claims := &keycloak.Claims{Scope: "openid"}
 	conf := &Config{Scope: []string{"admin-scope"}}
 
 	if err := CheckAccess(claims, conf); err == nil {
@@ -88,10 +90,10 @@ func TestCheckAccess_Scope_Fail(t *testing.T) {
 }
 
 func TestCheckAccess_Combined_AllPass(t *testing.T) {
-	claims := &KeycloakClaims{
-		RealmAccess: RoleSet{Roles: []string{"admin"}},
+	claims := &keycloak.Claims{
+		RealmAccess: keycloak.RoleSet{Roles: []string{"admin"}},
 		Azp:         "myapp",
-		ResourceAccess: map[string]RoleSet{
+		ResourceAccess: map[string]keycloak.RoleSet{
 			"myapp": {Roles: []string{"write"}},
 		},
 		Scope: "openid profile",
@@ -108,10 +110,10 @@ func TestCheckAccess_Combined_AllPass(t *testing.T) {
 }
 
 func TestCheckAccess_Combined_RealmFails(t *testing.T) {
-	claims := &KeycloakClaims{
-		RealmAccess: RoleSet{Roles: []string{"viewer"}},
+	claims := &keycloak.Claims{
+		RealmAccess: keycloak.RoleSet{Roles: []string{"viewer"}},
 		Azp:         "myapp",
-		ResourceAccess: map[string]RoleSet{
+		ResourceAccess: map[string]keycloak.RoleSet{
 			"myapp": {Roles: []string{"write"}},
 		},
 		Scope: "openid profile",

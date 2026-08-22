@@ -1,14 +1,16 @@
-package main
+package plugin
 
 import (
 	"fmt"
 	"strings"
+
+	"github.com/open-source-cloud/kong-jwt-keycloak/pkg/keycloak"
 )
 
 // CheckAccess verifies that the token claims satisfy the plugin's authorization config.
 // Returns nil if access is granted, or an error describing the failure.
 // If no roles/scope are configured, any valid token is accepted.
-func CheckAccess(claims *KeycloakClaims, conf *Config) error {
+func CheckAccess(claims *keycloak.Claims, conf *Config) error {
 	if len(conf.RealmRoles) > 0 {
 		if !hasAny(claims.RealmRoles(), conf.RealmRoles) {
 			return fmt.Errorf("required realm roles: [%s]", strings.Join(conf.RealmRoles, ", "))

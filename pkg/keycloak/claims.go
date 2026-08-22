@@ -1,4 +1,4 @@
-package main
+package keycloak
 
 import (
 	"strings"
@@ -11,8 +11,8 @@ type RoleSet struct {
 	Roles []string `json:"roles"`
 }
 
-// KeycloakClaims represents the JWT claims structure issued by Keycloak.
-type KeycloakClaims struct {
+// Claims represents the JWT claims structure issued by Keycloak.
+type Claims struct {
 	jwt.RegisteredClaims
 	Email             string             `json:"email"`
 	PreferredUsername string             `json:"preferred_username"`
@@ -29,7 +29,7 @@ type KeycloakClaims struct {
 
 // AudienceString returns the JWT audience as a single comma-separated string,
 // suitable for an X-Token-Audience HTTP header. Empty if no audience is set.
-func (c *KeycloakClaims) AudienceString() string {
+func (c *Claims) AudienceString() string {
 	if len(c.Audience) == 0 {
 		return ""
 	}
@@ -37,12 +37,12 @@ func (c *KeycloakClaims) AudienceString() string {
 }
 
 // RealmRoles returns the list of realm-level roles from the token.
-func (c *KeycloakClaims) RealmRoles() []string {
+func (c *Claims) RealmRoles() []string {
 	return c.RealmAccess.Roles
 }
 
 // ClientRoles returns the roles for the authorized party (azp) client.
-func (c *KeycloakClaims) ClientRoles() []string {
+func (c *Claims) ClientRoles() []string {
 	if c.ResourceAccess == nil {
 		return nil
 	}
@@ -54,7 +54,7 @@ func (c *KeycloakClaims) ClientRoles() []string {
 }
 
 // Scopes returns the token scopes as a slice (space-separated in JWT).
-func (c *KeycloakClaims) Scopes() []string {
+func (c *Claims) Scopes() []string {
 	if c.Scope == "" {
 		return nil
 	}

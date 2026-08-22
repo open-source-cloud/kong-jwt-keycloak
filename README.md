@@ -1,11 +1,28 @@
 # kong-jwt-keycloak
 
-A [Kong Gateway](https://konghq.com/) plugin that validates Keycloak-issued JWTs,
-written in Go using the [Kong Go PDK](https://github.com/Kong/go-pdk).
+[![CI](https://github.com/open-source-cloud/kong-jwt-keycloak/actions/workflows/ci.yaml/badge.svg)](https://github.com/open-source-cloud/kong-jwt-keycloak/actions/workflows/ci.yaml)
+[![Release](https://img.shields.io/github/v/release/open-source-cloud/kong-jwt-keycloak?sort=semver)](https://github.com/open-source-cloud/kong-jwt-keycloak/releases)
+[![Go Reference](https://pkg.go.dev/badge/github.com/open-source-cloud/kong-jwt-keycloak.svg)](https://pkg.go.dev/github.com/open-source-cloud/kong-jwt-keycloak)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-It verifies token signatures against the issuing realm's JWKS endpoint, enforces
-role- and scope-based access rules, and forwards the authenticated identity to
-your upstream service as HTTP headers.
+**Stop every unauthenticated request at the gateway, not in your services.**
+
+`kong-jwt-keycloak` is a [Kong Gateway](https://konghq.com/) plugin that validates
+Keycloak-issued JWTs at the edge. It verifies signatures against each realm's JWKS
+endpoint, enforces role- and scope-based rules, and hands your upstream services an
+already-trusted identity as plain HTTP headers — so they never parse a token,
+never fetch a key, and never implement auth twice.
+
+Written in Go against the [Kong Go PDK](https://github.com/Kong/go-pdk) and shipped
+as a single static binary in a container image.
+
+## Why
+
+Kong's bundled `jwt` plugin needs every issuer's public key registered as a
+consumer credential by hand. That breaks the moment Keycloak rotates keys, and it
+does not scale to per-tenant realms. This plugin discovers keys via OpenID Connect
+discovery, caches them, and refetches automatically when an unrecognised `kid`
+appears — so key rotation and new tenant realms need no gateway changes.
 
 ## Features
 
@@ -135,13 +152,46 @@ When `set_upstream_headers` is enabled:
 
 Both return a JSON body of the form `{"error": "...", "message": "..."}`.
 
+## Project layout
+
+```
+cmd/kong-jwt-keycloak/   plugin server entrypoint
+internal/plugin/         Kong-facing handler, config schema, authorization rules
+pkg/keycloak/            reusable Keycloak primitives: claims, JWKS discovery + cache
+```
+
+`pkg/keycloak` carries no Kong dependency and can be imported on its own if you
+need Keycloak JWKS handling or claim parsing elsewhere.
+
+## Versioning and releases
+
+Releases are automated and follow [Semantic Versioning](https://semver.org/).
+Commits use [Conventional Commits](https://www.conventionalcommits.org/); on merge
+to `main`, [release-please](https://github.com/googleapis/release-please) opens a
+release PR that computes the next version and updates `CHANGELOG.md`. Merging that
+PR tags the release, which builds and publishes the multi-architecture image to
+GHCR.
+
+| Commit prefix | Version bump |
+|---|---|
+| `fix:` | patch |
+| `feat:` | minor |
+| `feat!:` / `BREAKING CHANGE:` | major |
+
+Images are published to `ghcr.io/open-source-cloud/kong-jwt-keycloak`, tagged with
+the exact version, the major.minor series, the major series, and `latest`.
+
 ## Development
 
 ```bash
 go vet ./...
 go test ./... -race
+gofmt -l .
 docker build -t kong-jwt-keycloak .
 ```
+
+Contributions are welcome. Please keep commit messages in Conventional Commits
+form, since the release automation derives versions from them.
 
 ## License
 
