@@ -6,7 +6,7 @@ COPY . .
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /kong-jwt-keycloak ./cmd/kong-jwt-keycloak
 
-FROM busybox:1.37
+FROM busybox:1.38
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /kong-jwt-keycloak /kong-jwt-keycloak
 ENTRYPOINT ["/kong-jwt-keycloak"]
