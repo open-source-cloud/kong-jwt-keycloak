@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	Version  = "0.2.0" // x-release-please-version
+	Version  = "0.3.0" // x-release-please-version
 	Priority = 1000
 )
 
