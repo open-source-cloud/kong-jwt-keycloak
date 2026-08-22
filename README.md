@@ -31,7 +31,7 @@ appears — so key rotation and new tenant realms need no gateway changes.
 - **JWKS with rotation handling** — keys are cached and automatically refetched
   when an unknown `kid` appears, with a configurable grace period.
 - **Authorization** — require realm roles, client roles, or scopes. Checks use
-  OR logic: the token needs *any* one of the listed values.
+  OR logic: the token needs _any_ one of the listed values.
 - **Public paths** — skip authentication entirely for health checks and docs.
 - **CORS-safe** — optionally skip preflight (`OPTIONS`) requests so the CORS
   plugin can answer them.
@@ -67,7 +67,7 @@ gateway:
 
     initContainers:
       - name: plugin-jwt-keycloak
-        image: ghcr.io/open-source-cloud/kong-jwt-keycloak:v0.2.0
+        image: ghcr.io/open-source-cloud/kong-jwt-keycloak:0.2.0
         command: ["cp", "/kong-jwt-keycloak", "/plugins/jwt-keycloak"]
         volumeMounts:
           - name: kong-plugins
@@ -108,24 +108,24 @@ Apply it to a route with `konghq.com/plugins: jwt-keycloak` on the Ingress.
 
 ### Options
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `allowed_iss` | `[]string` | — | Allowed token issuers. An entry ending in `*` matches any non-empty suffix. |
-| `well_known_template` | `string` | `%s/.well-known/openid-configuration` | Discovery URL template. |
-| `algorithm` | `string` | `RS256` | Expected signing algorithm. |
-| `header_names` | `[]string` | `["authorization"]` | Headers to read the token from. |
-| `cookie_names` | `[]string` | — | Cookies to read the token from. |
-| `uri_param_names` | `[]string` | — | Query parameters to read the token from. |
-| `realm_roles` | `[]string` | — | Require any one of these realm roles. |
-| `client_roles` | `[]string` | — | Require any one of these roles on the `azp` client. |
-| `scope` | `[]string` | — | Require any one of these scopes. |
-| `public_paths` | `[]string` | — | Path prefixes that skip authentication. |
-| `jwks_cache_ttl` | `int` | `3600` | JWKS cache lifetime, in seconds. |
-| `key_grace_period` | `int` | `10` | Seconds to tolerate clock skew on key rotation. |
-| `maximum_expiration` | `int` | — | Reject tokens whose lifetime exceeds this many seconds. |
-| `run_on_preflight` | `bool` | `true` | Whether to validate `OPTIONS` requests. |
-| `set_upstream_headers` | `bool` | — | Forward identity headers to the upstream. |
-| `strip_auth_header` | `bool` | — | Remove `Authorization` before proxying. |
+| Field                  | Type       | Default                               | Description                                                                 |
+| ---------------------- | ---------- | ------------------------------------- | --------------------------------------------------------------------------- |
+| `allowed_iss`          | `[]string` | —                                     | Allowed token issuers. An entry ending in `*` matches any non-empty suffix. |
+| `well_known_template`  | `string`   | `%s/.well-known/openid-configuration` | Discovery URL template.                                                     |
+| `algorithm`            | `string`   | `RS256`                               | Expected signing algorithm.                                                 |
+| `header_names`         | `[]string` | `["authorization"]`                   | Headers to read the token from.                                             |
+| `cookie_names`         | `[]string` | —                                     | Cookies to read the token from.                                             |
+| `uri_param_names`      | `[]string` | —                                     | Query parameters to read the token from.                                    |
+| `realm_roles`          | `[]string` | —                                     | Require any one of these realm roles.                                       |
+| `client_roles`         | `[]string` | —                                     | Require any one of these roles on the `azp` client.                         |
+| `scope`                | `[]string` | —                                     | Require any one of these scopes.                                            |
+| `public_paths`         | `[]string` | —                                     | Path prefixes that skip authentication.                                     |
+| `jwks_cache_ttl`       | `int`      | `3600`                                | JWKS cache lifetime, in seconds.                                            |
+| `key_grace_period`     | `int`      | `10`                                  | Seconds to tolerate clock skew on key rotation.                             |
+| `maximum_expiration`   | `int`      | —                                     | Reject tokens whose lifetime exceeds this many seconds.                     |
+| `run_on_preflight`     | `bool`     | `true`                                | Whether to validate `OPTIONS` requests.                                     |
+| `set_upstream_headers` | `bool`     | —                                     | Forward identity headers to the upstream.                                   |
+| `strip_auth_header`    | `bool`     | —                                     | Remove `Authorization` before proxying.                                     |
 
 If no `realm_roles`, `client_roles` or `scope` are set, any valid token from an
 allowed issuer is accepted.
@@ -134,21 +134,21 @@ allowed issuer is accepted.
 
 When `set_upstream_headers` is enabled:
 
-| Header | Source claim |
-|---|---|
-| `X-User-Sub` | `sub` |
-| `X-User-Email` | `email` |
-| `X-User-Name` | `preferred_username` |
-| `X-Realm-Roles` | `realm_access.roles`, comma-separated |
-| `X-Token-Audience` | `aud`, comma-separated |
-| `X-Tenant-Slug` | `tenant_id`, if present |
+| Header             | Source claim                          |
+| ------------------ | ------------------------------------- |
+| `X-User-Sub`       | `sub`                                 |
+| `X-User-Email`     | `email`                               |
+| `X-User-Name`      | `preferred_username`                  |
+| `X-Realm-Roles`    | `realm_access.roles`, comma-separated |
+| `X-Token-Audience` | `aud`, comma-separated                |
+| `X-Tenant-Slug`    | `tenant_id`, if present               |
 
 ## Responses
 
-| Status | Meaning |
-|---|---|
-| `401` | Missing, malformed, expired, or untrusted token. |
-| `403` | Valid token, but the required roles or scopes are absent. |
+| Status | Meaning                                                   |
+| ------ | --------------------------------------------------------- |
+| `401`  | Missing, malformed, expired, or untrusted token.          |
+| `403`  | Valid token, but the required roles or scopes are absent. |
 
 Both return a JSON body of the form `{"error": "...", "message": "..."}`.
 
@@ -172,11 +172,11 @@ release PR that computes the next version and updates `CHANGELOG.md`. Merging th
 PR tags the release, which builds and publishes the multi-architecture image to
 GHCR.
 
-| Commit prefix | Version bump |
-|---|---|
-| `fix:` | patch |
-| `feat:` | minor |
-| `feat!:` / `BREAKING CHANGE:` | major |
+| Commit prefix                 | Version bump |
+| ----------------------------- | ------------ |
+| `fix:`                        | patch        |
+| `feat:`                       | minor        |
+| `feat!:` / `BREAKING CHANGE:` | major        |
 
 Images are published to `ghcr.io/open-source-cloud/kong-jwt-keycloak`, tagged with
 the exact version, the major.minor series, the major series, and `latest`.
