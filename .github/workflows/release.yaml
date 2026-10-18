@@ -3,7 +3,26 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_call:
+    inputs:
+      version:
+        description: Version to publish, without a leading v (e.g. 0.3.1)
+        required: true
+        type: string
+      tag:
+        description: Existing git tag to build and attach the image to
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish, without a leading v (e.g. 0.3.1)
+        required: true
+        type: string
+      tag:
+        description: Existing git tag to build and attach the image to
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -19,6 +38,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -32,6 +53,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: docker/setup-qemu-action@v3
 
@@ -49,14 +72,15 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}},value=${{ inputs.version || github.ref_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version || github.ref_name }}
+            type=semver,pattern={{major}},value=${{ inputs.version || github.ref_name }}
+            type=raw,value=latest,enable=${{ github.event_name != 'workflow_dispatch' }}
           labels: |
             org.opencontainers.image.title=kong-jwt-keycloak
             org.opencontainers.image.description=Kong Gateway plugin validating Keycloak-issued JWTs
             org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.version=${{ inputs.version || github.ref_name }}
 
       - name: Build and push
         id: push
@@ -73,7 +97,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
       - name: Create GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: inputs.tag == '' && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
@@ -85,3 +109,20 @@ jobs:
             ```
 
             Digest: `${{ steps.push.outputs.digest }}`
+
+      - name: Add image to release notes
+        if: inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          body=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+          if grep -q '^## Container image' <<<"$body"; then
+            exit 0
+          fi
+          fence='```'
+          printf '%s\n\n## Container image\n\n%s\n%s\n%s\n\nDigest: %s%s%s\n' \
+            "$body" "$fence" "$IMAGE" "$fence" '`' "$DIGEST" '`' > notes.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
