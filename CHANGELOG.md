@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/open-source-cloud/kong-jwt-keycloak/compare/kong-jwt-keycloak-v0.3.0...kong-jwt-keycloak-v0.3.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **ci:** publish the release image and document Kong 3.9 sidecar mode ([#10](https://github.com/open-source-cloud/kong-jwt-keycloak/issues/10)) ([fd69a4e](https://github.com/open-source-cloud/kong-jwt-keycloak/commit/fd69a4ea9f6f068071c6f6bd02a3ecd5e1e2a9ef))
+
 ## [0.3.0](https://github.com/open-source-cloud/kong-jwt-keycloak/compare/kong-jwt-keycloak-v0.2.0...kong-jwt-keycloak-v0.3.0) (2026-08-22)
 
 
