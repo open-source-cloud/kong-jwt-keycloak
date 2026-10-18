@@ -42,6 +42,11 @@ appears — so key rotation and new tenant realms need no gateway changes.
 
 The plugin ships as a container image containing a single static binary. Copy it
 into the Kong container with an init container and register it as a plugin server.
+How the plugin server process is started depends on the Kong version.
+
+### Kong 3.10 and later
+
+Kong starts and supervises the plugin server itself (`start_cmd`).
 
 ```yaml
 gateway:
@@ -67,7 +72,7 @@ gateway:
 
     initContainers:
       - name: plugin-jwt-keycloak
-        image: ghcr.io/open-source-cloud/kong-jwt-keycloak:0.2.0
+        image: ghcr.io/open-source-cloud/kong-jwt-keycloak:0.3.0 # x-release-please-version
         command: ["cp", "/kong-jwt-keycloak", "/plugins/jwt-keycloak"]
         volumeMounts:
           - name: kong-plugins
@@ -77,6 +82,74 @@ gateway:
 Kong's container filesystem is read-only, so the plugin server is pointed at a
 writable `emptyDir` via `-kong-prefix`. The socket path must match the directory
 the binary will create it in.
+
+### Kong 3.9.x
+
+Do not set `start_cmd` on Kong 3.9. When Kong starts a plugin server it stores
+the process handle in its configuration, and the Admin API `GET /` then fails
+with `Cannot serialise cdata: type not supported`
+([Kong/kong#14260](https://github.com/Kong/kong/issues/14260)). The Kong Ingress
+Controller reads `GET /` on startup, so it crash-loops and the gateway never
+receives a configuration. This affects every Go plugin, not only this one.
+
+Run the plugin server as a native sidecar instead. Kong then only connects to the
+socket and `GET /` keeps working:
+
+```yaml
+gateway:
+  env:
+    plugins: "bundled,jwt-keycloak"
+    pluginserver_names: "jwt-keycloak"
+    pluginserver_jwt_keycloak_socket: "/usr/local/kong/plugin-servers/jwt-keycloak.socket"
+    pluginserver_jwt_keycloak_query_cmd: "/usr/local/kong/plugins/jwt-keycloak -dump"
+
+  deployment:
+    userDefinedVolumes:
+      - name: kong-plugins
+        emptyDir: {}
+      - name: kong-plugin-servers
+        emptyDir: {}
+
+    userDefinedVolumeMounts:
+      - name: kong-plugins
+        mountPath: /usr/local/kong/plugins
+      - name: kong-plugin-servers
+        mountPath: /usr/local/kong/plugin-servers
+
+    initContainers:
+      - name: plugin-jwt-keycloak
+        image: ghcr.io/open-source-cloud/kong-jwt-keycloak:0.3.0 # x-release-please-version
+        command: ["cp", "/kong-jwt-keycloak", "/plugins/jwt-keycloak"]
+        volumeMounts:
+          - name: kong-plugins
+            mountPath: /plugins
+      - name: plugin-server-jwt-keycloak
+        image: ghcr.io/open-source-cloud/kong-jwt-keycloak:0.3.0 # x-release-please-version
+        restartPolicy: Always
+        command: ["/plugins/jwt-keycloak", "-kong-prefix", "/usr/local/kong/plugin-servers"]
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+          - name: kong-plugins
+            mountPath: /plugins
+            readOnly: true
+          - name: kong-plugin-servers
+            mountPath: /usr/local/kong/plugin-servers
+```
+
+- The sidecar runs the copy in the shared `emptyDir`, so the binary is named
+  `jwt-keycloak` and creates `jwt-keycloak.socket`, matching the plugin name Kong
+  gets from `-dump`.
+- It must run as the same user as the Kong container (`1000` in the Kong Helm
+  chart), or Kong cannot connect to the socket.
+- `restartPolicy: Always` on an init container (native sidecar, Kubernetes 1.29+)
+  starts it after the copy and before Kong, and restarts it if it exits.
 
 ## Configuration
 
@@ -119,7 +192,7 @@ Apply it to a route with `konghq.com/plugins: jwt-keycloak` on the Ingress.
 | `realm_roles`          | `[]string` | —                                     | Require any one of these realm roles.                                       |
 | `client_roles`         | `[]string` | —                                     | Require any one of these roles on the `azp` client.                         |
 | `scope`                | `[]string` | —                                     | Require any one of these scopes.                                            |
-| `public_paths`         | `[]string` | —                                     | Path prefixes that skip authentication.                                     |
+| `public_paths`         | `[]string` | —                                     | Path prefixes that skip authentication, matched against the client path.    |
 | `jwks_cache_ttl`       | `int`      | `3600`                                | JWKS cache lifetime, in seconds.                                            |
 | `key_grace_period`     | `int`      | `10`                                  | Seconds to tolerate clock skew on key rotation.                             |
 | `maximum_expiration`   | `int`      | —                                     | Reject tokens whose lifetime exceeds this many seconds.                     |
@@ -129,6 +202,10 @@ Apply it to a route with `konghq.com/plugins: jwt-keycloak` on the Ingress.
 
 If no `realm_roles`, `client_roles` or `scope` are set, any valid token from an
 allowed issuer is accepted.
+
+`public_paths` is compared with the path the client sent, before Kong strips a
+route prefix. Behind an Ingress with `konghq.com/strip-path: "true"` on `/app`,
+list `/app/health`, not `/health`.
 
 ### Upstream headers
 

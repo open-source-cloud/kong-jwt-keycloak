@@ -8,7 +8,7 @@
       "include-v-in-tag": true,
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
-      "extra-files": ["cmd/kong-jwt-keycloak/main.go"],
+      "extra-files": ["cmd/kong-jwt-keycloak/main.go", "README.md"],
       "changelog-sections": [
         { "type": "feat", "section": "Features" },
         { "type": "fix", "section": "Bug Fixes" },
