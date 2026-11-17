@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/Kong/go-pdk"
 	"github.com/golang-jwt/jwt/v5"
@@ -255,10 +257,29 @@ func isAllowedIssuer(issuer string, allowed []string) bool {
 var unauthorizedBody = []byte(`{"error":"unauthorized"}`)
 
 func exitUnauthorized(kong *pdk.PDK, reason string) {
-	_ = kong.Log.Info("jwt-keycloak: rejected token: ", reason)
+	_ = kong.Log.Info("jwt-keycloak: rejected token: ", escapeControl(reason))
 	kong.Response.Exit(401, unauthorizedBody, map[string][]string{
 		"Content-Type": {"application/json"},
 	})
+}
+
+// escapeControl escapes control characters such as newlines. A rejection
+// reason can carry text from the token (under a wildcard allowed_iss the
+// issuer is chosen by the client), and it must not start a new log line.
+func escapeControl(s string) string {
+	if !strings.ContainsFunc(s, unicode.IsControl) {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			q := strconv.QuoteRune(r) // e.g. '\n'
+			b.WriteString(q[1 : len(q)-1])
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func exitForbidden(kong *pdk.PDK, message string) {
