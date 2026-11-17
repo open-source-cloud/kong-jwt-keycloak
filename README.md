@@ -73,7 +73,7 @@ gateway:
 
     initContainers:
       - name: plugin-jwt-keycloak
-        image: ghcr.io/open-source-cloud/kong-jwt-keycloak:0.3.1 # x-release-please-version
+        image: ghcr.io/open-source-cloud/kong-jwt-keycloak:0.4.0 # x-release-please-version
         command: ["cp", "/kong-jwt-keycloak", "/plugins/jwt-keycloak"]
         volumeMounts:
           - name: kong-plugins
@@ -119,13 +119,13 @@ gateway:
 
     initContainers:
       - name: plugin-jwt-keycloak
-        image: ghcr.io/open-source-cloud/kong-jwt-keycloak:0.3.1 # x-release-please-version
+        image: ghcr.io/open-source-cloud/kong-jwt-keycloak:0.4.0 # x-release-please-version
         command: ["cp", "/kong-jwt-keycloak", "/plugins/jwt-keycloak"]
         volumeMounts:
           - name: kong-plugins
             mountPath: /plugins
       - name: plugin-server-jwt-keycloak
-        image: ghcr.io/open-source-cloud/kong-jwt-keycloak:0.3.1 # x-release-please-version
+        image: ghcr.io/open-source-cloud/kong-jwt-keycloak:0.4.0 # x-release-please-version
         restartPolicy: Always
         command: ["/plugins/jwt-keycloak", "-kong-prefix", "/usr/local/kong/plugin-servers"]
         securityContext:
