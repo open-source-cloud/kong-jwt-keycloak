@@ -235,7 +235,13 @@ When `set_upstream_headers` is enabled:
 | `401`  | Missing, malformed, expired, or untrusted token.          |
 | `403`  | Valid token, but the required roles or scopes are absent. |
 
-Both return a JSON body of the form `{"error": "...", "message": "..."}`.
+A `401` always has the body `{"error": "unauthorized"}`, whatever check failed,
+so clients cannot probe which issuers are trusted or which check they tripped.
+The reason is written to the Kong error log at `info` level, prefixed with
+`jwt-keycloak: rejected token:`; set Kong's `log_level` to `info` to see it.
+
+A `403` has the body `{"error": "forbidden", "message": "..."}`, where the message
+names the roles or scopes the route requires.
 
 ## Project layout
 

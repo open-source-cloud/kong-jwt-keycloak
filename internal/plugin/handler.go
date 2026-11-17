@@ -67,7 +67,7 @@ func (conf *Config) Access(kong *pdk.PDK) {
 	// 4. Validate algorithm
 	alg, _ := unverified.Header["alg"].(string)
 	if alg != conf.Algorithm {
-		exitUnauthorized(kong, fmt.Sprintf("unexpected algorithm: %s", alg))
+		exitUnauthorized(kong, fmt.Sprintf("unexpected algorithm: %q", alg))
 		return
 	}
 
@@ -81,7 +81,7 @@ func (conf *Config) Access(kong *pdk.PDK) {
 	unverifiedClaims := unverified.Claims.(*keycloak.Claims)
 	issuer, _ := unverifiedClaims.GetIssuer()
 	if !isAllowedIssuer(issuer, conf.AllowedIss) {
-		exitUnauthorized(kong, fmt.Sprintf("invalid issuer: %s", issuer))
+		exitUnauthorized(kong, fmt.Sprintf("issuer not allowed: %q", issuer))
 		return
 	}
 
@@ -228,12 +228,14 @@ func isAllowedIssuer(issuer string, allowed []string) bool {
 	return false
 }
 
-func exitUnauthorized(kong *pdk.PDK, message string) {
-	body, _ := json.Marshal(map[string]string{
-		"error":   "unauthorized",
-		"message": message,
-	})
-	kong.Response.Exit(401, body, map[string][]string{
+// unauthorizedBody is the same for every rejected token. Telling the client
+// which check failed, or which issuers the gateway trusts, only helps someone
+// probing it; the reason goes to the Kong log instead.
+var unauthorizedBody = []byte(`{"error":"unauthorized"}`)
+
+func exitUnauthorized(kong *pdk.PDK, reason string) {
+	_ = kong.Log.Info("jwt-keycloak: rejected token: ", reason)
+	kong.Response.Exit(401, unauthorizedBody, map[string][]string{
 		"Content-Type": {"application/json"},
 	})
 }
