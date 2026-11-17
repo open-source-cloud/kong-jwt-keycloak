@@ -5,9 +5,13 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -34,6 +38,14 @@ func rsaPublicKeyToJWK(pub *rsa.PublicKey, kid string) JWK {
 
 func setupTestJWKSServer(t *testing.T, keys ...*rsa.PrivateKey) (*httptest.Server, []JWK) {
 	t.Helper()
+	srv, jwks, _ := setupCountingJWKSServer(t, keys...)
+	return srv, jwks
+}
+
+// setupCountingJWKSServer is setupTestJWKSServer plus a counter of every
+// request the fake issuer receives (discovery and JWKS).
+func setupCountingJWKSServer(t *testing.T, keys ...*rsa.PrivateKey) (*httptest.Server, []JWK, *atomic.Int64) {
+	t.Helper()
 
 	jwks := make([]JWK, len(keys))
 	for i, key := range keys {
@@ -52,9 +64,39 @@ func setupTestJWKSServer(t *testing.T, keys ...*rsa.PrivateKey) (*httptest.Serve
 		json.NewEncoder(w).Encode(resp)
 	})
 
-	srv := httptest.NewServer(mux)
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		mux.ServeHTTP(w, r)
+	}))
 	t.Cleanup(srv.Close)
-	return srv, jwks
+	return srv, jwks, &hits
+}
+
+// fakeClock lets tests move the provider's clock instead of sleeping.
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func newFakeClock() *fakeClock { return &fakeClock{t: time.Unix(1_700_000_000, 0)} }
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
+func newTestProvider(clock *fakeClock, opts ...Option) *JWKSProvider {
+	p := NewJWKSProvider("%s/.well-known/openid-configuration", 3600, opts...)
+	p.now = clock.Now
+	return p
 }
 
 func TestJWKSProvider_GetKey(t *testing.T) {
@@ -112,22 +154,236 @@ func TestJWKSProvider_RefreshIfStale(t *testing.T) {
 	key := generateTestRSAKey(t)
 	srv, _ := setupTestJWKSServer(t, key)
 
-	provider := NewJWKSProvider("%s/.well-known/openid-configuration", 3600)
+	clock := newFakeClock()
+	provider := newTestProvider(clock)
 
 	// Populate cache
-	provider.GetKey(srv.URL, "test-kid-0")
-
-	// Force cache to be stale
-	provider.mu.Lock()
-	if cached, ok := provider.cache[srv.URL]; ok {
-		cached.fetchedAt = time.Now().Add(-1 * time.Hour)
+	if _, err := provider.GetKey(srv.URL, "test-kid-0"); err != nil {
+		t.Fatalf("GetKey failed: %v", err)
 	}
-	provider.mu.Unlock()
 
-	// Should refresh
-	refreshed := provider.RefreshIfStale(srv.URL, 10*time.Second)
-	if !refreshed {
+	if provider.RefreshIfStale(srv.URL, 10*time.Second) {
+		t.Fatal("expected no refresh right after a fetch")
+	}
+
+	clock.Advance(time.Hour)
+
+	if !provider.RefreshIfStale(srv.URL, 10*time.Second) {
 		t.Fatal("expected refresh to succeed")
+	}
+}
+
+// Reproduction from issue #12: five tokens with random kids used to cost the
+// issuer ten requests (discovery + JWKS each).
+func TestJWKSProvider_UnknownKidsDoNotHammerIssuer(t *testing.T) {
+	key := generateTestRSAKey(t)
+	srv, _, hits := setupCountingJWKSServer(t, key)
+
+	clock := newFakeClock()
+	provider := newTestProvider(clock, WithMinRefetchInterval(10*time.Second))
+
+	for i := 1; i <= 5; i++ {
+		_, err := provider.GetKey(srv.URL, "rnd"+strconv.Itoa(i))
+		if !errors.Is(err, ErrKeyNotFound) {
+			t.Fatalf("rnd%d: expected ErrKeyNotFound, got %v", i, err)
+		}
+	}
+	if got := hits.Load(); got != 2 {
+		t.Fatalf("issuer received %d requests, want 2 (one discovery, one JWKS)", got)
+	}
+
+	// The known kid is still served from the cache.
+	if _, err := provider.GetKey(srv.URL, "test-kid-0"); err != nil {
+		t.Fatalf("known kid: %v", err)
+	}
+	if got := hits.Load(); got != 2 {
+		t.Fatalf("known kid caused a fetch: %d requests", got)
+	}
+}
+
+func TestJWKSProvider_UnknownKidRefetchesOncePerInterval(t *testing.T) {
+	key := generateTestRSAKey(t)
+	srv, _, hits := setupCountingJWKSServer(t, key)
+
+	clock := newFakeClock()
+	provider := newTestProvider(clock, WithMinRefetchInterval(10*time.Second))
+
+	if _, err := provider.GetKey(srv.URL, "test-kid-0"); err != nil {
+		t.Fatalf("warm-up: %v", err)
+	}
+	hits.Store(0)
+
+	// Cache still fresh, interval elapsed: one refetch for the first unknown kid,
+	// then nothing until the interval passes again.
+	clock.Advance(11 * time.Second)
+	for i := 0; i < 5; i++ {
+		provider.GetKey(srv.URL, "rnd")
+	}
+	if got := hits.Load(); got != 2 {
+		t.Fatalf("after first interval: %d requests, want 2", got)
+	}
+
+	clock.Advance(11 * time.Second)
+	for i := 0; i < 5; i++ {
+		provider.GetKey(srv.URL, "rnd")
+	}
+	if got := hits.Load(); got != 4 {
+		t.Fatalf("after second interval: %d requests, want 4", got)
+	}
+}
+
+func TestJWKSProvider_RotatedKeyFoundAfterInterval(t *testing.T) {
+	oldKey := generateTestRSAKey(t)
+	newKey := generateTestRSAKey(t)
+
+	var mu sync.Mutex
+	published := []JWK{rsaPublicKeyToJWK(&oldKey.PublicKey, "old")}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(wellKnownResponse{JWKsURI: "http://" + r.Host + "/certs"})
+	})
+	mux.HandleFunc("/certs", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		json.NewEncoder(w).Encode(jwksResponse{Keys: published})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	clock := newFakeClock()
+	provider := newTestProvider(clock, WithMinRefetchInterval(10*time.Second))
+
+	if _, err := provider.GetKey(srv.URL, "old"); err != nil {
+		t.Fatalf("old key: %v", err)
+	}
+
+	mu.Lock()
+	published = append(published, rsaPublicKeyToJWK(&newKey.PublicKey, "new"))
+	mu.Unlock()
+
+	// Inside the interval the new kid is answered from the cache.
+	if _, err := provider.GetKey(srv.URL, "new"); !errors.Is(err, ErrKeyNotFound) {
+		t.Fatalf("new kid inside interval: expected ErrKeyNotFound, got %v", err)
+	}
+
+	clock.Advance(11 * time.Second)
+	got, err := provider.GetKey(srv.URL, "new")
+	if err != nil {
+		t.Fatalf("new kid after interval: %v", err)
+	}
+	if got.N.Cmp(newKey.PublicKey.N) != 0 {
+		t.Fatal("returned key does not match the rotated key")
+	}
+}
+
+func TestJWKSProvider_ConcurrentFetchesAreCoalesced(t *testing.T) {
+	key := generateTestRSAKey(t)
+	srv, _, hits := setupCountingJWKSServer(t, key)
+
+	provider := newTestProvider(newFakeClock())
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			provider.GetKey(srv.URL, "rnd"+strconv.Itoa(i))
+		}(i)
+	}
+	wg.Wait()
+
+	if got := hits.Load(); got != 2 {
+		t.Fatalf("50 concurrent unknown kids caused %d requests, want 2", got)
+	}
+}
+
+func TestJWKSProvider_FailedFetchIsThrottled(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.Error(w, "down", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+
+	clock := newFakeClock()
+	provider := newTestProvider(clock, WithMinRefetchInterval(10*time.Second))
+
+	for i := 0; i < 5; i++ {
+		if _, err := provider.GetKey(srv.URL, "any"); err == nil {
+			t.Fatal("expected an error from a failing issuer")
+		}
+	}
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("failing issuer received %d requests, want 1", got)
+	}
+
+	clock.Advance(11 * time.Second)
+	provider.GetKey(srv.URL, "any")
+	if got := hits.Load(); got != 2 {
+		t.Fatalf("after interval: %d requests, want 2", got)
+	}
+}
+
+func TestJWKSProvider_FailedRefetchKeepsCachedKeys(t *testing.T) {
+	key := generateTestRSAKey(t)
+	jwks := []JWK{rsaPublicKeyToJWK(&key.PublicKey, "test-kid-0")}
+	var down atomic.Bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(wellKnownResponse{JWKsURI: "http://" + r.Host + "/certs"})
+	})
+	mux.HandleFunc("/certs", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(jwksResponse{Keys: jwks})
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if down.Load() {
+			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+
+	clock := newFakeClock()
+	provider := newTestProvider(clock, WithMinRefetchInterval(10*time.Second))
+
+	if _, err := provider.GetKey(srv.URL, "test-kid-0"); err != nil {
+		t.Fatalf("warm-up: %v", err)
+	}
+
+	down.Store(true)
+	clock.Advance(11 * time.Second)
+	if _, err := provider.GetKey(srv.URL, "rnd"); err == nil {
+		t.Fatal("expected an error for an unknown kid while the issuer is down")
+	}
+	if _, err := provider.GetKey(srv.URL, "test-kid-0"); err != nil {
+		t.Fatalf("known kid should still validate from the fresh cache: %v", err)
+	}
+}
+
+func TestJWKSProvider_FailedIssuersAreBounded(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(srv.Close)
+
+	clock := newFakeClock()
+	provider := newTestProvider(clock, WithMinRefetchInterval(10*time.Second))
+	provider.maxFailedIssuers = 8
+
+	for i := 0; i < 50; i++ {
+		provider.GetKey(srv.URL+"/realms/tenant-"+strconv.Itoa(i), "kid")
+	}
+	if got := len(provider.failed); got > 8 {
+		t.Fatalf("failed-issuer map grew to %d entries, cap is 8", got)
+	}
+
+	// Once the old failures expire they make room for new ones.
+	clock.Advance(11 * time.Second)
+	provider.GetKey(srv.URL+"/realms/tenant-new", "kid")
+	if _, ok := provider.failed[srv.URL+"/realms/tenant-new"]; !ok {
+		t.Fatal("expected expired failures to be pruned for a new issuer")
+	}
+	if got := len(provider.failed); got > 8 {
+		t.Fatalf("failed-issuer map grew to %d entries, cap is 8", got)
 	}
 }
 

@@ -29,7 +29,8 @@ appears — so key rotation and new tenant realms need no gateway changes.
 - **Multi-realm** — accept tokens from an explicit list of issuers, with `*`
   wildcard support for per-tenant realms.
 - **JWKS with rotation handling** — keys are cached and automatically refetched
-  when an unknown `kid` appears, with a configurable grace period.
+  when an unknown `kid` appears, at most once per issuer per `key_grace_period`,
+  so clients cannot use random `kid` values to flood Keycloak.
 - **Authorization** — require realm roles, client roles, or scopes. Checks use
   OR logic: the token needs _any_ one of the listed values.
 - **Public paths** — skip authentication entirely for health checks and docs.
@@ -194,7 +195,7 @@ Apply it to a route with `konghq.com/plugins: jwt-keycloak` on the Ingress.
 | `scope`                | `[]string` | —                                     | Require any one of these scopes.                                            |
 | `public_paths`         | `[]string` | —                                     | Path prefixes that skip authentication, matched against the client path.    |
 | `jwks_cache_ttl`       | `int`      | `3600`                                | JWKS cache lifetime, in seconds.                                            |
-| `key_grace_period`     | `int`      | `10`                                  | Seconds to tolerate clock skew on key rotation.                             |
+| `key_grace_period`     | `int`      | `10`                                  | Minimum seconds between JWKS fetches for one issuer (see below).            |
 | `maximum_expiration`   | `int`      | —                                     | Reject tokens whose lifetime exceeds this many seconds.                     |
 | `run_on_preflight`     | `bool`     | `true`                                | Whether to validate `OPTIONS` requests.                                     |
 | `set_upstream_headers` | `bool`     | —                                     | Forward identity headers to the upstream.                                   |
@@ -202,6 +203,13 @@ Apply it to a route with `konghq.com/plugins: jwt-keycloak` on the Ingress.
 
 If no `realm_roles`, `client_roles` or `scope` are set, any valid token from an
 allowed issuer is accepted.
+
+`key_grace_period` limits how often the plugin goes back to an issuer. A token
+with an unknown `kid`, or one that fails the signature check, triggers at most one
+JWKS fetch per issuer in that window; other tokens in the window are answered
+from the cache. Failed fetches count too. Concurrent fetches for one issuer are
+merged into one. A key Keycloak starts signing with is picked up within
+`key_grace_period` seconds of the last fetch.
 
 `public_paths` is compared with the path the client sent, before Kong strips a
 route prefix. Behind an Ingress with `konghq.com/strip-path: "true"` on `/app`,
