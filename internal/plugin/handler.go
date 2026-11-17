@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Kong/go-pdk"
@@ -12,15 +13,25 @@ import (
 	"github.com/open-source-cloud/kong-jwt-keycloak/pkg/keycloak"
 )
 
-var jwksProvider *keycloak.JWKSProvider
+var (
+	providerMu   sync.Mutex
+	jwksProvider *keycloak.JWKSProvider
+)
+
+// provider returns the process-wide JWKS provider, creating it from the first
+// configuration that needs it. Kong can run Access concurrently.
+func provider(conf *Config) *keycloak.JWKSProvider {
+	providerMu.Lock()
+	defer providerMu.Unlock()
+	if jwksProvider == nil {
+		jwksProvider = keycloak.NewJWKSProvider(conf.WellKnownTemplate, conf.JWKSCacheTTL,
+			keycloak.WithMinRefetchInterval(time.Duration(conf.KeyGracePeriod)*time.Second))
+	}
+	return jwksProvider
+}
 
 func (conf *Config) Access(kong *pdk.PDK) {
 	conf.applyDefaults()
-
-	// Lazy-init the global JWKS provider
-	if jwksProvider == nil {
-		jwksProvider = keycloak.NewJWKSProvider(conf.WellKnownTemplate, conf.JWKSCacheTTL)
-	}
 
 	// 1. Skip preflight if configured
 	if !conf.RunOnPreflight {
@@ -123,7 +134,8 @@ func (conf *Config) Access(kong *pdk.PDK) {
 // verifyToken parses and verifies the JWT signature using JWKS.
 // On signature failure, it retries once if the cache is stale (key rotation).
 func verifyToken(tokenStr, issuer, kid string, conf *Config) (*keycloak.Claims, error) {
-	pubKey, err := jwksProvider.GetKey(issuer, kid)
+	jwks := provider(conf)
+	pubKey, err := jwks.GetKey(issuer, kid)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get public key: %w", err)
 	}
@@ -136,8 +148,8 @@ func verifyToken(tokenStr, issuer, kid string, conf *Config) (*keycloak.Claims, 
 	if err != nil {
 		// Retry once if keys might have rotated
 		gracePeriod := time.Duration(conf.KeyGracePeriod) * time.Second
-		if jwksProvider.RefreshIfStale(issuer, gracePeriod) {
-			pubKey, err2 := jwksProvider.GetKey(issuer, kid)
+		if jwks.RefreshIfStale(issuer, gracePeriod) {
+			pubKey, err2 := jwks.GetKey(issuer, kid)
 			if err2 != nil {
 				return nil, fmt.Errorf("token verification failed: %w", err)
 			}
