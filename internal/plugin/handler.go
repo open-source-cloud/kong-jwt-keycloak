@@ -3,6 +3,7 @@ package plugin
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -92,7 +93,13 @@ func (conf *Config) Access(kong *pdk.PDK) {
 		return
 	}
 
-	// 7. Validate maximum expiration
+	// 7. Validate audience and token type
+	if err := checkTokenUse(claims, conf); err != nil {
+		exitUnauthorized(kong, err.Error())
+		return
+	}
+
+	// 8. Validate maximum expiration
 	if conf.MaximumExpiration > 0 {
 		exp, _ := claims.GetExpirationTime()
 		iat, _ := claims.GetIssuedAt()
@@ -104,13 +111,13 @@ func (conf *Config) Access(kong *pdk.PDK) {
 		}
 	}
 
-	// 8. Check RBAC
+	// 9. Check RBAC
 	if err := CheckAccess(claims, conf); err != nil {
 		exitForbidden(kong, err.Error())
 		return
 	}
 
-	// 9. Set upstream headers consumed by the upstream service.
+	// 10. Set upstream headers consumed by the upstream service.
 	if conf.SetUpstreamHeaders {
 		sub, _ := claims.GetSubject()
 		kong.ServiceRequest.SetHeader("X-User-Sub", sub)
@@ -125,7 +132,7 @@ func (conf *Config) Access(kong *pdk.PDK) {
 		}
 	}
 
-	// 10. Optionally strip Authorization header
+	// 11. Optionally strip Authorization header
 	if conf.StripAuthHeader {
 		kong.ServiceRequest.ClearHeader("Authorization")
 	}
@@ -169,6 +176,20 @@ func verifyToken(tokenStr, issuer, kid string, conf *Config) (*keycloak.Claims, 
 	}
 
 	return claims, nil
+}
+
+// checkTokenUse rejects signed, unexpired tokens that were not issued for this
+// API: an audience outside allowed_aud, or a Keycloak token type outside
+// allowed_typ (an ID token is signed with the same realm key as an access
+// token). Each check is skipped when its list is empty.
+func checkTokenUse(claims *keycloak.Claims, conf *Config) error {
+	if len(conf.AllowedTyp) > 0 && !slices.Contains(conf.AllowedTyp, claims.Typ) {
+		return fmt.Errorf("token type not allowed: %q", claims.Typ)
+	}
+	if len(conf.AllowedAud) > 0 && !hasAny(claims.Audience, conf.AllowedAud) {
+		return fmt.Errorf("audience not allowed: %q", []string(claims.Audience))
+	}
+	return nil
 }
 
 // extractToken retrieves the Bearer token from configured locations.

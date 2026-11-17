@@ -181,3 +181,42 @@ func TestAccess_ForbiddenStillNamesRequirement(t *testing.T) {
 		t.Fatalf("403 body should name the missing role, got %s", env.ClientRes.Body)
 	}
 }
+
+// Issue #14: an ID token is signed with the same realm key as an access token,
+// so only aud and Keycloak's typ claim can tell it apart.
+func TestAccess_TokenUse(t *testing.T) {
+	iss := newTestIssuer(t)
+
+	cases := []struct {
+		name       string
+		allowedTyp []string
+		allowedAud []string
+		claims     jwt.MapClaims
+		wantStatus int
+	}{
+		{"no checks configured, ID token", nil, nil, jwt.MapClaims{"typ": "ID", "aud": "web-app"}, 0},
+		{"typ Bearer allowed", []string{"Bearer"}, nil, jwt.MapClaims{"typ": "Bearer"}, 0},
+		{"ID token rejected", []string{"Bearer"}, nil, jwt.MapClaims{"typ": "ID"}, 401},
+		{"missing typ rejected", []string{"Bearer"}, nil, nil, 401},
+		{"aud string matches", nil, []string{"orders-api"}, jwt.MapClaims{"aud": "orders-api"}, 0},
+		{"aud array matches any", nil, []string{"orders-api"}, jwt.MapClaims{"aud": []string{"account", "orders-api"}}, 0},
+		{"aud mismatch rejected", nil, []string{"orders-api"}, jwt.MapClaims{"aud": "account"}, 401},
+		{"missing aud rejected", nil, []string{"orders-api"}, nil, 401},
+		{"both checks pass", []string{"Bearer"}, []string{"orders-api"}, jwt.MapClaims{"typ": "Bearer", "aud": "orders-api"}, 0},
+		{"ID token with right aud rejected", []string{"Bearer"}, []string{"orders-api"}, jwt.MapClaims{"typ": "ID", "aud": "orders-api"}, 401},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			conf := iss.config()
+			conf.AllowedTyp = c.allowedTyp
+			conf.AllowedAud = c.allowedAud
+
+			env := access(t, conf, iss.token(t, c.claims))
+
+			if env.ClientRes.Status != c.wantStatus {
+				t.Fatalf("status = %d, want %d (body %s)", env.ClientRes.Status, c.wantStatus, env.ClientRes.Body)
+			}
+		})
+	}
+}

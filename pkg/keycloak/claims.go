@@ -21,6 +21,11 @@ type Claims struct {
 	Scope             string             `json:"scope"`
 	Azp               string             `json:"azp"`
 
+	// Typ is Keycloak's token type claim (not the JOSE header): "Bearer" on
+	// access tokens, "ID" on ID tokens. Both are signed with the same realm
+	// key, so this is what tells them apart.
+	Typ string `json:"typ"`
+
 	// TenantID is a hardcoded claim injected by per-tenant Keycloak realms
 	// (tenant-<slug>). Empty for tokens issued by the shared 'main'
 	// realm (admin-side requests are not tenant-scoped).
