@@ -167,6 +167,8 @@ config:
     - "https://auth.example.com/realms/main"
     - "https://auth.example.com/realms/tenant-*"
   algorithm: RS256
+  allowed_typ:
+    - Bearer
   jwks_cache_ttl: 3600
   key_grace_period: 10
   set_upstream_headers: true
@@ -187,6 +189,8 @@ Apply it to a route with `konghq.com/plugins: jwt-keycloak` on the Ingress.
 | `allowed_iss`          | `[]string` | —                                     | Allowed token issuers. An entry ending in `*` matches any non-empty suffix. |
 | `well_known_template`  | `string`   | `%s/.well-known/openid-configuration` | Discovery URL template.                                                     |
 | `algorithm`            | `string`   | `RS256`                               | Expected signing algorithm.                                                 |
+| `allowed_aud`          | `[]string` | —                                     | Require the token's `aud` to contain any one of these values.               |
+| `allowed_typ`          | `[]string` | —                                     | Require Keycloak's `typ` claim to be one of these, e.g. `["Bearer"]`.       |
 | `header_names`         | `[]string` | `["authorization"]`                   | Headers to read the token from.                                             |
 | `cookie_names`         | `[]string` | —                                     | Cookies to read the token from.                                             |
 | `uri_param_names`      | `[]string` | —                                     | Query parameters to read the token from.                                    |
@@ -203,6 +207,14 @@ Apply it to a route with `konghq.com/plugins: jwt-keycloak` on the Ingress.
 
 If no `realm_roles`, `client_roles` or `scope` are set, any valid token from an
 allowed issuer is accepted.
+
+Keycloak signs ID tokens with the same realm key, issuer and algorithm as access
+tokens, so without `allowed_typ` an ID token is accepted like an access token.
+Set `allowed_typ: ["Bearer"]` to accept access tokens only; Keycloak sets `typ`
+to `ID` on ID tokens. `allowed_aud` restricts tokens to the clients your API serves;
+Keycloak adds a client to `aud` through an Audience mapper on the client scope.
+Both checks run after the signature check and are skipped when the list is empty.
+A token that fails either one gets a `401`.
 
 `key_grace_period` limits how often the plugin goes back to an issuer. A token
 with an unknown `kid`, or one that fails the signature check, triggers at most one

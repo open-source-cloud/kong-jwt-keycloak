@@ -8,6 +8,10 @@ type Config struct {
 	WellKnownTemplate string   `json:"well_known_template"`
 	Algorithm         string   `json:"algorithm"`
 
+	// Token use (empty means no check)
+	AllowedAud []string `json:"allowed_aud"`
+	AllowedTyp []string `json:"allowed_typ"`
+
 	// Token location
 	HeaderNames   []string `json:"header_names"`
 	CookieNames   []string `json:"cookie_names"`
